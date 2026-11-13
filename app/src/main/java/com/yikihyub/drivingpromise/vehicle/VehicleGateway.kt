@@ -198,16 +198,23 @@ class VehicleGateway(context: Context) {
         withTimeoutOrNull(1_500) {
             suspendCancellableCoroutine<T?> { cont ->
                 runCatching {
-                    block({ v -> if (cont.isActive) cont.resume(v) }, { e -> fail("read", e); if (cont.isActive) cont.resume(null) })
-                }.onFailure { fail("read", it); if (cont.isActive) cont.resume(null) }
+                    // 차 상태 항목은 차종·권한에 따라 원래 없는 경우가 많다(경고등은 privileged). 오류로 띄우지 않고 로그만.
+                    block({ v -> if (cont.isActive) cont.resume(v) }, { e -> Log.i(tag, "status read: ${e.message}"); if (cont.isActive) cont.resume(null) })
+                }.onFailure { Log.i(tag, "status read: ${it.message}"); if (cont.isActive) cont.resume(null) }
             }
         }
 
     private inline fun reg(what: String, block: () -> Unit) { runCatching(block).onFailure { fail(what, it) } }
 
+    /** 차종에 없는 신호(전기차의 연료 등)는 정상이라 화면 오류로 올리지 않는다. 그 신호를 쓰는 안내만 꺼진다. */
     private fun fail(what: String, e: Throwable) {
-        Log.w(tag, "$what failed: ${e.message}")
-        _lastError.value = "$what: ${e.message ?: e.javaClass.simpleName}"
+        val msg = e.message.orEmpty()
+        if (msg.contains("not supported", ignoreCase = true) || msg.contains("NOT_SUPPORTED")) {
+            Log.i(tag, "$what unsupported on this vehicle")
+            return
+        }
+        Log.w(tag, "$what failed: $msg")
+        _lastError.value = "$what: ${msg.ifBlank { e.javaClass.simpleName }}"
     }
 
     private fun VehicleGear?.toGear() = when (this) {

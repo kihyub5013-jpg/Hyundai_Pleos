@@ -190,6 +190,8 @@ class DrivingCompanion(
 
     // ───────────── 페달 확인 안내 ─────────────
 
+    private var lastLoggedSpeed = -1f
+
     private suspend fun pedalLoop() {
         while (scope.isActive) {
             delay(100)
@@ -202,6 +204,10 @@ class DrivingCompanion(
             val sample = PedalSample(now, demoSpeed ?: _speedKmh.value, demoBrake ?: vehicle.brake.value, gear, nearParking)
             if (demoSpeed != null) _speedKmh.value = demoSpeed!!
             _sensitive.value = guard.isSensitive(sample)
+            if (com.yikihyub.drivingpromise.BuildConfig.DEBUG && sample.speedKmh != lastLoggedSpeed) {
+                lastLoggedSpeed = sample.speedKmh
+                Log.d(tag, "sample v=${sample.speedKmh} brake=${sample.brake} gear=${sample.gear} accel=${guard.lastAccel} sensitive=${_sensitive.value}")
+            }
             val a = guard.onSample(sample)
             if (a != null) onPedalAlert(a)
             else if (guard.hardStop) saveSpot("급하게 멈춘 곳")
@@ -251,6 +257,14 @@ class DrivingCompanion(
             coach.checkHeadlight(dark, vehicle.lowBeamOn.value, v, now)?.let(::say)
             _trip.value?.let { if (dark && v > 5f && !it.night) _trip.value = it.copy(night = true) }
             if (_trip.value != null && tick % 2 == 0) navi.poll()
+            // 연속 주행시간 신호(TRIP_DRIVING_TIME)가 없는 차는 운행 시작부터 센다 (1시간마다 쉬기)
+            if (vehicle.drivingMinutes.value == null && tick % 30 == 0) {
+                _trip.value?.let { t ->
+                    val min = ((now - t.startMs) / 60_000).toInt()
+                    if (min > t.longestStintMin) _trip.value = t.copy(longestStintMin = min)
+                    coach.onDrivingMinutes(min, store.settings.value.promises)?.let(::say)
+                }
+            }
         }
     }
 

@@ -262,7 +262,7 @@ Vehicle / 차속 / 위치 / 내비 ──▶ Gateway (StateFlow) ──▶ Drivi
 | --- | --- | --- |
 | `PLEOS_CLIENT_ID`, `PLEOS_CLIENT_SECRET` | SpeechToText `registerApp` → HYBRID 인식 | ON_DEVICE 인식만 사용 |
 | `PLEOS_PROJECT_ID` | 설정 화면 표시 | — |
-| `PLEOS_CRN` | `scripts/set-devbox-crn.sh`가 에뮬레이터 VHAL에 주입 | 서버 음성 인식 연결 실패 |
+| `PLEOS_CRN` | `scripts/set-devbox-crn.sh`가 devbox VHAL에 주입 | — (Pleos Connect Emulator 2.x는 `adb root`가 막혀 있어 주입 불가. 에뮬레이터에서는 CRN 없이도 STT 서버 등록이 됐음) |
 
 빌드할 때 `app/build.gradle.kts`가 `.env`를 읽어 `BuildConfig`에 넣습니다. 같은 이름의 환경 변수가 있으면 그 값이 먼저입니다.
 
@@ -270,7 +270,7 @@ Vehicle / 차속 / 위치 / 내비 ──▶ Gateway (StateFlow) ──▶ Drivi
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug   # 테스트 + APK
-./scripts/set-devbox-crn.sh                 # 에뮬레이터를 새로 만들었을 때 한 번 (adb root → CRN 주입 → 재부팅)
+./scripts/set-devbox-crn.sh                 # devbox(실장비)에서 한 번 (adb root → CRN 주입 → 재부팅)
 ./scripts/run.sh                            # 빌드 → 설치(권한 자동 허용) → 실행
 ```
 
@@ -282,13 +282,33 @@ adb logcat -s Companion VehicleGateway SpeedGateway NaviGateway SpeechGateway
 
 ## 8. 시연 방법
 
-### Virtual Console로
-1. 앱을 켜고 "내 약속"에서 약속을 고른 뒤 "이대로 시작하기"
-2. 기어 **R**, 브레이크 **끔**
-3. 차속을 1초 안에 2 → 16 km/h로 올림
-4. "지금 엑셀이에요! 브레이크로 바꾸세요" 음성과 빨간 전체 화면 경고
+### Virtual Console로 (스크립트)
 
-브레이크를 **켠 채** 속도를 올리면 "브레이크 끝까지 꾹 밟으세요", 정차(0km/h) 직후 브레이크 없이 1초 만에 15km/h로 올리면 "엑셀 밟고 계세요, 발 확인하세요"가 나옵니다.
+`scripts/vc.sh`가 Virtual Console HTTP API(`adb forward tcp:8088`)로 기어·차속·브레이크를 넣습니다. 브라우저 heartbeat도 대신 보냅니다.
+
+```bash
+./scripts/vc.sh parking   # R 기어, 브레이크 없이 2→16km/h (1.2초)  → "지금 엑셀이에요! 브레이크로 바꾸세요"
+./scripts/vc.sh weak      # 보통 출발 후 브레이크 밟은 채 25→34km/h → "브레이크 끝까지 꾹 밟으세요"
+./scripts/vc.sh launch    # 정차 후 브레이크 떼고 0→15km/h (1초)    → "엑셀 밟고 계세요, 발 확인하세요"
+./scripts/vc.sh normal    # 보통 출발 0→30km/h (7초) 후 브레이크 정지 → 안내 없음
+```
+
+- Virtual Console의 `/vehicle/controls`는 차속을 **정수 km/h**로만 받습니다(소수면 400 `invalid_speed`).
+- R 기어에서는 Pleos가 후방 카메라를 전체 화면으로 띄워 앱 화면을 가립니다. 실제 차도 같으므로 후진 중에는 음성 안내가 주 수단입니다.
+
+### 에뮬레이터 확인 결과 (Pleos Connect Emulator 2.x, 2026-11-13)
+
+| 항목 | 결과 |
+| --- | --- |
+| Vehicle SDK 브레이크·기어 수신 | 정상 |
+| 차속 (`PERF_VEHICLE_SPEED`) | 정상, 약 0.1초 간격으로 들어옴 |
+| 후진 중 엑셀 / 브레이크 덜 밟음 / 급출발 | 세 안내 모두 울림 |
+| 보통 출발·감속 | 안내 없음 |
+| 페달 경고 전체 화면, 시연 버튼 3개 | 정상 |
+| TTS (ON_DEVICE) | 음성 합성 확인 (에뮬레이터는 `-no-audio`로 실행해 소리는 미확인) |
+| STT HYBRID `registerApp` | `.env` Client ID/Secret으로 서버 연결됨 |
+| NaviHelper | 연결됨 (경로 안내 시나리오는 아직 미확인) |
+| 에뮬레이터에 없는 신호 | 연료(EV 차), 연속 주행시간 → 연속 주행시간은 운행 시작 시각으로 대신 계산 |
 
 ### Virtual Console 없이
 "설정·시연" 탭의 버튼 3개가 같은 신호를 앱 안에서 재현합니다. 실제 신호와 같은 판단 로직을 거칩니다. 시연 값은 운행 기록과 깜짝 지점에 남지 않습니다.
@@ -339,7 +359,7 @@ SDK 문서와 실제 API(jar)를 확인한 결과, 기획서와 달라진 부분
 
 | 단계 | 범위 |
 | --- | --- |
-| 1단계 (구현, 에뮬레이터 검증 전) | 페달 확인 안내, 약속 설정, 해 지기 전 도착 확인, 오늘의 차 상태, 주차장 천천히 |
-| 2단계 (구현, 에뮬레이터 검증 전) | 좌회전·방향지시등·비·전조등 안내, 깜짝 지점, 이달의 약속, 주의구간, 시연 모드 |
+| 1단계 (구현, 페달 안내 에뮬레이터 확인) | 페달 확인 안내, 약속 설정, 해 지기 전 도착 확인, 오늘의 차 상태, 주차장 천천히 |
+| 2단계 (구현, 내비 연동 안내는 에뮬레이터 확인 전) | 좌회전·방향지시등·비·전조등 안내, 깜짝 지점, 이달의 약속, 주의구간, 시연 모드 |
 | 3단계 | 가족 공유 서버, 음성 명령 확장, 페달 안내 기준값 실차 튜닝, 동승자 감지(Seat 점유) |
 | 확장 | 조건부 면허용 약속 이행 확인서, 보험 특약 연계, 정차 중 차량 제어(성에 제거·좌석 복원 등) |
