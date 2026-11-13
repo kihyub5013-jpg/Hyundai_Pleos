@@ -1,54 +1,345 @@
 # 내 운전 약속
 
-Pleos Connect 차량 앱. **고령 운전자가 스스로 정한 운전 조건(밤·비·고속도로·장거리)을 차가 함께 지켜주고, 위험한 순간에는 "지금 밟은 페달"을 음성으로 알려준다.**
-기획서: [docs/proposal.md](docs/proposal.md)
+> 현대자동차그룹 Pleos Connect 차량용 앱 개발 공모전 출품작
 
-## 기능과 SDK
+**고령 운전자가 스스로 정한 운전 조건(밤, 비, 고속도로, 장거리)을 차가 함께 지켜주고, 위험한 순간에는 "지금 밟은 페달"을 음성으로 알려주는 Pleos Connect 앱입니다.**
 
-| 기능 | 코드 | Pleos SDK / API |
-|---|---|---|
-| 페달 확인 안내 (엑셀·브레이크 덜 밟음·급출발) | `domain/PedalGuard.kt` | Vehicle Brake·Gear + AAOS `PERF_VEHICLE_SPEED`, TTS ON_DEVICE |
-| 깜짝 지점 저장·다음 방문 때 미리 알림 | `Companion.saveSpot / watchSpots` | FusedLocation `addProximityAlert` |
-| 오늘의 차 상태 한마디 | `domain/CarCheck.kt` | Vehicle Safety(엔진오일·브레이크액·경고등), Fuel, EvBattery |
-| 해 지기 전 도착 확인 | `domain/Sun.kt`, `DepartureCheck` | NaviHelper DestinationInfo(남은 시간), FusedLocation(일몰 계산 위치) |
-| 편한 길·무료도로 우선 출발 | `Companion.routeOption / go` | NaviHelper `requestRoute(COMFORTABLE/FREE)`, `changeRouteOption` |
-| 좌회전·회전교차로 미리 알림, 방향지시등 도우미 | `domain/DriveCoach.kt` | NaviHelper `onTBTInfo`, Vehicle TurnSignal·SteeringWheel |
-| 사고다발·스쿨존·철길 미리 알림 | `DriveCoach.onCaution` | NaviHelper `onCautionPointInfo` |
-| 비 오면 차분 모드, 해질녘 전조등 | `DriveCoach.onWiper / checkHeadlight` | Vehicle Wiper·Light(하향등) |
-| 1시간마다 쉬기 | `DriveCoach.onDrivingMinutes` | Vehicle Odometer `TripCurrentDrivingTime` |
-| 주차장 천천히·주차 위치 | `Companion.onNaviEvent` | NaviHelper `onDestinationArrived`, `getCurrentLocationInfo` |
-| 말로 목적지·약속 설정 | `domain/Voice.kt` | SpeechToText(HYBRID + registerApp), NaviHelper 즐겨찾기·최근 목적지 |
-| 이달의 약속·가족 공유 미리보기 | `domain/Monthly.kt`, `ui/screens/MonthScreen.kt` | Vehicle Odometer (차 안 파일 저장) |
+운전을 그만두게 하는 앱이 아니라, 계속 운전하면서 위험한 순간과 조건을 줄이도록 돕는 "셀프 조건부 운전" 앱입니다.
 
-모든 안내는 음성이 먼저다. 주행 중(UX 제한)에는 "오늘" 화면만 남고, 페달 안내는 전체 화면으로 덮는다.
+- 기획서: [docs/proposal.md](docs/proposal.md)
+- 플랫폼: Pleos Connect (Android Automotive OS), Kotlin, Jetpack Compose
+- 사용 SDK: Pleos Vehicle · NaviHelper · TextToSpeech · SpeechToText · FusedLocation (5종 모두)
 
-## 설정 (.env)
+---
 
-루트 `.env`(커밋 금지)를 빌드 때 읽어 `BuildConfig` 로 넣는다. 형식은 `.env.example`.
+## 목차
 
-| 키 | 쓰는 곳 |
-|---|---|
-| `PLEOS_CLIENT_ID`, `PLEOS_CLIENT_SECRET` | SpeechToText `registerApp` → HYBRID 인식. 비우면 ON_DEVICE |
-| `PLEOS_PROJECT_ID` | 설정 화면 표시 |
-| `PLEOS_CRN` | `scripts/set-devbox-crn.sh` 가 에뮬레이터 VHAL 에 주입 (서버 음성 인식용 기기 식별) |
+1. [왜 만들었나](#1-왜-만들었나)
+2. [핵심 기능](#2-핵심-기능)
+3. [사용 시나리오](#3-사용-시나리오)
+4. [페달 확인 안내는 어떻게 판단하나](#4-페달-확인-안내는-어떻게-판단하나)
+5. [Pleos SDK 사용 내역](#5-pleos-sdk-사용-내역)
+6. [구조](#6-구조)
+7. [빌드·실행](#7-빌드실행)
+8. [시연 방법](#8-시연-방법)
+9. [테스트](#9-테스트)
+10. [개인정보와 안전 원칙](#10-개인정보와-안전-원칙)
+11. [알려진 제약](#11-알려진-제약)
+12. [다음 단계](#12-다음-단계)
 
-## 빌드·실행
+---
 
-```bash
-source ~/android-sdk/env.sh
-./gradlew testDebugUnitTest assembleDebug   # 도메인 테스트 30개
-./scripts/set-devbox-crn.sh                 # 에뮬레이터 새로 만들었을 때 한 번 (adb root → CRN 주입 → 재부팅)
-./scripts/run.sh                            # 설치·실행
+## 1. 왜 만들었나
+
+| 근거 | 수치 |
+| --- | --- |
+| 고령 운전자 수 | 2021→2025년 401만 → 563만 명 (+40.2%) |
+| 고령 운전자 사고 | 2021년 3만1,841건 → 2025년 4만5,873건 (+44.1%) |
+| 면허 자진 반납률 | 2025년 2.51%, 5년째 2%대 |
+| 페달 오조작 사고 | 5년간 567건 중 60세 이상 70.5% |
+| 페달 오조작 장소 | 주차구역 내 주차·후진·출차 중 48% |
+
+출처는 [기획서](docs/proposal.md#출처)에 정리했습니다.
+
+기존 해법에는 빈자리가 있습니다.
+
+- **면허 반납:** 생계와 이동 때문에 반납률이 2%대에 머뭅니다.
+- **페달 오조작 방지장치:** 대부분 시속 15km 이하에서만 작동합니다.
+- **조건부 면허:** 야간·고속도로·거리 제한이 검토되고 있지만(2027년 하반기 목표), 운전자가 조건을 스스로 지키고 확인할 도구는 없습니다.
+
+이 앱은 차 안에서 그 빈자리를 채웁니다. 속도와 관계없이 페달 상태를 음성으로 알려주고, 조건부 면허가 요구할 조건을 운전자가 먼저 정해 지키게 합니다.
+
+## 2. 핵심 기능
+
+### A. 페달 확인 안내
+
+속도 변화와 브레이크 페달 상태를 실시간으로 비교해, 브레이크 대신 가속 페달을 밟고 있을 가능성이 높으면 짧은 음성으로 알려줍니다. **차량을 제어하지 않는 보조 안내입니다.**
+
+| 차 상태 | 판단 | 음성 안내 |
+| --- | --- | --- |
+| 속도가 빠르게 오르고 브레이크는 안 밟힘 | 가속 페달을 세게 밟고 있음 | "지금 엑셀이에요! 브레이크로 바꾸세요" |
+| 브레이크가 밟혔는데 속도가 계속 오름 | 덜 밟았거나 두 페달을 함께 밟음 | "브레이크 끝까지 꾹 밟으세요" |
+| 정차 직후 브레이크 없이 급출발 | 브레이크로 착각하고 가속 페달을 밟음 | "엑셀 밟고 계세요, 발 확인하세요" |
+| 브레이크가 밟히고 속도가 줄어듦 | 정상 | 없음 |
+
+- 안내가 울리면 화면 전체가 빨간 경고로 바뀌고, 말하던 다른 안내를 끊고 바로 읽습니다.
+- 차량 내장 TTS(ON_DEVICE)를 써서 네트워크를 기다리지 않습니다.
+- 민감도는 3단계(덜 민감 / 보통 / 민감)로 운전자가 고릅니다.
+- **깜짝 지점:** 안내가 울렸거나 급하게 멈춘 곳을 저장해 두고, 다음에 반경 150m 안에 들어가면 "지난번 놀랐던 곳이에요, 천천히 가요"라고 미리 알려줍니다.
+
+### B. 내 운전 약속
+
+운전자가 고른 약속(여러 개 가능)을 차가 출발 전, 운전 중, 운전 후에 함께 지켜줍니다.
+
+| 약속 | 앱이 하는 일 |
+| --- | --- |
+| 해 진 뒤 운전 안 함 | 출발 전에 도착 예정 시각을 오늘 일몰과 비교해 말해줌 |
+| 고속도로 피함 | 무료도로 우선(FREE) 경로로 길 찾기. 내비에서 직접 목적지를 정해도 옵션을 바꿈 |
+| 비 오면 가까운 곳만 | 와이퍼가 켜지고 목적지가 15km보다 멀면 한마디 |
+| 1시간마다 쉬기 | 연속 주행 1시간마다 쉬어 가자고 말함 |
+| 밤엔 동승자 있을 때만 | 밤에 출발하면 동승자가 있는지 묻고 답을 기록 |
+
+말로도 정할 수 있습니다. 예: "밤에는 운전 안 하는 약속", "고속도로 피하는 약속".
+
+### C. 출발 전·운전 중·운전 후 안내
+
+| 시점 | 기능 | 내용 |
+| --- | --- | --- |
+| 출발 전 | 오늘의 차 상태 한마디 | 엔진오일, 브레이크액, 경고등, 연료/배터리를 한 문장으로. 문제가 있으면 정비소·주유소·충전소 제안 |
+| 출발 전 | 해 지기 전 도착 확인 | "지금 출발하면 해 지기 20분 전에 도착해요" / "해 지고 30분 뒤에 도착해요" |
+| 출발 전 | 경로 미리보기 | "가는 길에 회전교차로 1곳, 사고가 잦은 곳 1곳이 있어요" |
+| 운전 중 | 좌회전·유턴 미리 알림 | 300m 전에 한 번 |
+| 운전 중 | 회전교차로 안내 | 500m 전, 진출 방향을 "세 번째 출구"처럼 |
+| 운전 중 | 방향지시등 도우미 | 회전 50m 전인데 깜빡이를 안 켜면 알림 / 회전이 없는데 25초 넘게 켜져 있으면 알림 |
+| 운전 중 | 주의구간 미리 알림 | 사고다발, 어린이 보호구역, 철길, 안개, 급경사, 미끄러운 길 등 300m 전 |
+| 운전 중 | 비 오면 차분 모드 | 와이퍼가 켜지는 순간 전조등·김서림 확인 |
+| 운전 중 | 해질녘 전조등 | 해가 졌는데 전조등이 꺼져 있으면 (10분에 한 번까지) |
+| 도착 | 주차장 천천히 | 도착 300m 전과 도착 시 "주차장이에요, 천천히 브레이크 확인하세요", 주차 위치 저장 |
+| 운전 후 | 이달의 약속 | 운전 횟수, 약속 지킨 횟수, 밤·비 운전, 가장 긴 연속 운전, 페달 안내 횟수 |
+| 운전 후 | 가족 공유 | 본인이 켤 때만. "11월 운전 10번, 약속 30번 중 29번 지킴, 페달 확인 안내 0회" |
+
+한 번 가본 목적지는 회전 미리 알림을 줄이고, 사고다발·스쿨존 같은 위험 안내만 남깁니다.
+
+### D. 말로 하기
+
+화면을 보지 않고 쓸 수 있도록 큰 마이크 버튼 하나로 말합니다.
+
+| 이렇게 말하면 | 앱이 하는 일 |
+| --- | --- |
+| "집에 가자" / "회사로 가자" | 내비 즐겨찾기로 약속에 맞는 경로 안내 |
+| "○○병원으로 가자" | 즐겨찾기·최근 목적지에서 찾아 안내 |
+| "얼마나 남았어?" | 남은 시간 |
+| "차 상태 어때?" | 오늘의 차 상태 한마디 |
+| "이번 달 어땠어?" | 이달의 약속 요약 |
+| "밤에는 운전 안 하는 약속" | 약속 추가 |
+
+### 화면
+
+| 탭 | 내용 | 주행 중 |
+| --- | --- | --- |
+| 오늘 | 속도·브레이크·기어·페달 안내 구간, 출발 전 브리핑, 말로 하기 | 사용 가능 |
+| 내 약속 | 약속 고르기, 페달 안내 켜기/끄기, 민감도 | 잠김 |
+| 이달의 약속 | 월간 기록, 약속별 이행, 깜짝 지점, 가족 공유 미리보기 | 잠김 |
+| 설정·시연 | SDK 연결 상태, 시연 시나리오 | 잠김 |
+
+주행 중에는 Android Automotive UX 제한(`CarUxRestrictions`)을 따라 "오늘" 화면만 남습니다. 처음 실행하면 "내 약속" 화면에서 약속을 고른 뒤 시작합니다. Pleos 내비 옆 2분할 창(약 850px 폭)에서는 메뉴가 아이콘만 남는 좁은 레이아웃으로 바뀝니다.
+
+## 3. 사용 시나리오
+
+### 시나리오 1. 마트 주차장에서 페달을 헷갈린 순간
+72세 김영자 씨가 마트 지하주차장에서 후진으로 주차하다가 브레이크 대신 가속 페달을 밟습니다.
+1. 목적지 도착 직전: "곧 도착해요. 주차장에서는 천천히, 브레이크 확인하세요."
+2. 후진 중 브레이크 없이 속도가 빠르게 오름: 화면 전체가 빨갛게 바뀌고 "지금 엑셀이에요! 브레이크로 바꾸세요."
+3. 이 주차장이 깜짝 지점으로 저장되고, 다음 방문 때 진입 전에 미리 알려줍니다.
+
+### 시나리오 2. 병원 진료가 길어져 해가 지는 날
+"해 진 뒤엔 운전 안 함" 약속을 정한 68세 박정수 씨. 겨울 오후 4시, 집까지 1시간, 오늘 일몰은 5시 20분입니다.
+1. "집에 가자"라고 말하면 편한 길(COMFORTABLE)로 경로를 찾습니다.
+2. "지금 출발하면 해 지기 20분 전에 도착해요. 편한 길로 갈게요."
+3. 가는 길에 좌회전·전조등을 챙기고, 도착 후 이달의 기록에 "밤 운전 0번"이 남습니다.
+
+### 시나리오 3. 멀리 사는 자녀와의 안심 공유
+75세 아버지가 "밤엔 운전 안 함, 고속도로 피함, 1시간마다 쉬기"를 정하고 본인 동의로 가족 공유를 켭니다. 아들은 매달 "약속 30번 중 29번 지킴, 페달 확인 안내 0회" 같은 요약을 받습니다.
+
+### 시나리오 4. 처음 가보는 회전교차로와 사고다발 교차로
+1. 출발 시: "가는 길에 회전교차로 1곳, 사고가 잦은 곳 1곳이 있어요."
+2. 회전교차로 500m 전: "곧 회전교차로예요. 들어가기 전에 멈추고 왼쪽 차를 먼저 보내세요. 세 번째 출구로 나가요."
+3. 사고다발 지점 300m 전: "이곳은 사고가 잦은 곳이에요. 속도를 줄이고 맞은편 차를 확인하세요."
+4. 다음에 같은 목적지로 가면 회전 안내를 줄입니다.
+
+## 4. 페달 확인 안내는 어떻게 판단하나
+
+Pleos Vehicle SDK에는 가속 페달 신호가 없습니다. 그래서 **차속 변화(가속도)와 브레이크 페달 상태**로 간접 판단합니다. 구현은 [`domain/PedalGuard.kt`](app/src/main/java/com/yikihyub/drivingpromise/domain/PedalGuard.kt)입니다.
+
+- 입력: 0.1초마다 차속(km/h), 브레이크 밟힘 여부, 기어(P/R/N/D), 도착 직전 여부
+- 가속도: 최근 0.6초 이상 떨어진 두 시점의 차속 차이로 계산(km/h/s). 신호 잡음을 줄이기 위해서입니다.
+- **민감 구간:** 주차장(도착 300m 전 ~ 도착 후 5분), 시속 20km 이하, 정차 후 출발 10초 이내, 후진
+
+| 안내 | 조건 (민감도 "보통" 기준) |
+| --- | --- |
+| 브레이크 끝까지 | 브레이크를 계속 밟고 있는데 가속도 ≥ 2.5 km/h/s, 시속 3km 초과 |
+| 발 확인하세요 (급출발) | 민감 구간, 브레이크 없음, 후진이 아님, 정차 후 1.5초 안에 시속 12km 이상이거나 가속도 ≥ 9 |
+| 지금 엑셀이에요 | 민감 구간에서 브레이크 없이 가속도 ≥ 9 km/h/s (약 2.5 m/s²) |
+| 지금 엑셀이에요 | 일반 도로에서 브레이크 없이 가속도 ≥ 16 km/h/s (약 4.4 m/s²) |
+
+- 보통 출발은 4~7 km/h/s 정도라 민감 구간 기준(9)보다 낮고, 고속도로 합류 가속은 일반 도로 기준(16)보다 낮아 울리지 않습니다.
+- 민감도 배율: 덜 민감 ×1.35, 보통 ×1.0, 민감 ×0.75 (모든 기준에 곱함)
+- 같은 안내는 4초 동안 다시 울리지 않습니다. 자주 울리면 운전자가 기능을 꺼버리기 때문입니다.
+- 감속도가 14 km/h/s를 넘으면 "급하게 멈춘 곳"으로 보고 깜짝 지점에 저장합니다(음성 없음).
+- 기어가 P이면 판단하지 않습니다.
+
+> 이 기준값은 에뮬레이터·시뮬레이션으로 정한 초기값입니다. 실차 주행 데이터로 다시 맞춰야 합니다([다음 단계](#12-다음-단계)).
+
+## 5. Pleos SDK 사용 내역
+
+| SDK (버전) | 사용 API | 쓰는 기능 |
+| --- | --- | --- |
+| **Vehicle** 2.3.2 | Brake `registerBrakePedalStatus` | 페달 확인 안내 |
+| | Gear `registerGearSelection` | 후진·정차 판단, 운행 시작/종료 |
+| | TurnSignal `registerTurnSignalState`, SteeringWheel `registerSteeringWheelAngle` | 방향지시등 도우미 |
+| | Wiper `registerWiperState` | 비 오면 차분 모드, 비 운전 기록 |
+| | Light `registerLowBeamLightState` | 해질녘·비 올 때 전조등 확인 |
+| | Odometer `registerTripCurrentDrivingTime`, `registerDistanceDriven` | 1시간마다 쉬기, 주행거리 |
+| | Safety `getEngineOilLevelState`, `getBrakeFluidLevelState`, `getTelltalesInfo` | 오늘의 차 상태 |
+| | Fuel `getFuelPercent`, EvBattery `getEvBatteryStateOfCharge` | 연료·배터리 부족 안내 |
+| **NaviHelper** 3.0.5 | `getDestinationInfo` / `onDestinationInfo` | 남은 시간·거리 → 일몰 비교, 주차장 안내 |
+| | `getTBTInfo` / `onTBTInfo` | 좌회전·회전교차로 미리 알림, 고속도로 진입 기록 |
+| | `onCautionPointInfo` | 사고다발·스쿨존·철길 등 주의구간 |
+| | `requestRoute(RouteOption.COMFORTABLE / FREE)`, `changeRouteOption` | 약속에 맞는 경로 |
+| | `getBookmarkInfo`, `getRecentDestinationInfo` | "집에 가자", "○○로 가자" |
+| | `onRouteStarted`, `onDestinationArrived`, `getCurrentLocationInfo` | 출발 브리핑, 도착 안내, 주차 위치 |
+| **TextToSpeech** 3.3.1 | `Mode.ON_DEVICE`, `speak`, `stop` | 모든 음성 안내 (페달 안내는 즉시 끊고 재생) |
+| **SpeechToText** 3.3.1 | `Mode.HYBRID` + `registerApp(clientId, secret)`, `request` | 말로 목적지·약속 설정 (자격 정보가 없으면 ON_DEVICE) |
+| **FusedLocation** 1.1.3 | `registerFusedLocationCallback`, `getLastKnownLocation` | 일몰 계산 위치, 깜짝 지점 저장 |
+| | `addProximityAlert`, `removeProximityAlert` | 깜짝 지점 근접 알림 |
+| Android Car API | `CarPropertyManager` `PERF_VEHICLE_SPEED` | 차속 (Pleos Vehicle SDK에 차속 도메인이 없음) |
+| | `CarUxRestrictionsManager` | 주행 중 화면 제한 |
+
+### 권한
+
+| 권한 | 용도 |
+| --- | --- |
+| `pleos.car.permission.CAR_DRIVE` | 브레이크, 기어, 주행시간, 조향각 |
+| `pleos.car.permission.CAR_SAFETY` | 엔진오일, 브레이크액, 경고등 |
+| `pleos.car.permission.CAR_LIGHTS` | 하향등, 방향지시등 |
+| `pleos.car.permission.CAR_WINDOWS` | 와이퍼 |
+| `pleos.car.permission.CAR_ENERGY` | 연료, 배터리 |
+| `pleos.car.permission.CAR_CLIMATE`, `CAR_INFO` | 확장 기능 대비 |
+| `pleos.car.permission.NAVI_ROUTE`, `NAVI_ROUTE_SEARCH` | 내비 정보 조회, 경로 요청 |
+| `pleos.car.permission.FUSED_LOCATION` (런타임) | 위치, 근접 알림 |
+| `android.car.permission.CAR_SPEED` (런타임) | 차속 |
+| `pleos.car.permission.STT_SERVICE`, `TTS_SERVICE`, `RECORD_AUDIO` (런타임) | 음성 |
+
+차량 제어 권한(`CONTROL_CAR_*`)은 쓰지 않습니다.
+
+## 6. 구조
+
+```
+app/src/main/java/com/yikihyub/drivingpromise/
+├── PromiseApp.kt              앱 전역: SDK 게이트웨이와 운전 동반자 엔진을 하나씩 만든다
+├── domain/                    판단 로직 (대부분 Android 의존 없음, 단위 테스트 대상)
+│   ├── PedalGuard.kt          페달 확인 안내 판단
+│   ├── Promises.kt            약속 정의, 해 지기 전 도착·비 오는 날 판단
+│   ├── Sun.kt                 위치 기반 일출·일몰 계산 (NOAA 식, 오프라인)
+│   ├── CarCheck.kt            오늘의 차 상태 한 문장
+│   ├── DriveCoach.kt          운전 중 안내 규칙 (회전·깜빡이·주의구간·비·전조등·휴식), 경로 미리보기
+│   ├── Monthly.kt             운행 기록, 이달의 약속, 깜짝 지점
+│   ├── Voice.kt               음성 명령 해석
+│   └── Companion.kt           엔진: 신호를 모아 위 규칙을 돌리고, 음성 우선순위와 운행 기록을 관리
+├── vehicle/                   Pleos SDK 래퍼 (실패해도 앱이 죽지 않게 도메인별로 감쌈)
+│   ├── VehicleGateway.kt      Vehicle SDK
+│   ├── SpeedGateway.kt        AAOS 차속 (없으면 위치 기반 속도)
+│   ├── NaviGateway.kt         NaviHelper
+│   ├── LocationGateway.kt     FusedLocation, 근접 알림
+│   └── SpeechGateway.kt       TTS / STT
+├── data/Store.kt              설정(SharedPreferences), 운행 기록·깜짝 지점(차 안 JSON 파일)
+└── ui/                        Compose 화면 (오늘 · 내 약속 · 이달의 약속 · 설정·시연), Pleos 기본 앱 톤
 ```
 
-### 시연
-- **Virtual Console:** 기어 R → 브레이크 끔 → 속도를 1초 안에 2→16km/h 로 올리면 "지금 엑셀이에요! 브레이크로 바꾸세요".
-- **Virtual Console 없이:** 설정·시연 탭의 시나리오 3개(주차장 후진 페달 혼동 / 브레이크 덜 밟음 / 정차 후 급출발). 시연 값은 기록·깜짝 지점에 남지 않는다.
+동작 흐름:
 
-## 기획서와 다른 점 (SDK 확인 결과)
-- Tire `getLowTirePressure` 는 현재 공기압이 아니라 저압 **임계값**만 준다. 타이어는 차 상태 한마디에서 뺐다.
-- 경고등(Telltale)은 `PRIVATE_CAR_SAFETY`(signature|privileged) 라 일반 앱에서는 보통 비어 있다. 읽히면 노란 경고로 표시한다.
-- 차속은 Pleos Vehicle 에 없어 AAOS `PERF_VEHICLE_SPEED`(CAR_SPEED 런타임 권한). 못 쓰면 위치 변화로 계산한 속도로 대신한다.
-- 가족 공유 서버는 3단계. 지금은 보낼 문장 미리보기만.
-# Hyundai_Pleos
-# Hyundai_Pleos
+```
+Vehicle / 차속 / 위치 / 내비 ──▶ Gateway (StateFlow) ──▶ DrivingCompanion
+                                                          ├─ 0.1초마다 PedalGuard → 즉시 음성 + 전체 화면 경고 + 깜짝 지점 저장
+                                                          ├─ 1초마다 DriveCoach   → 순서대로 음성 안내
+                                                          ├─ 경로 시작 시         → 해 지기 전 도착·경로 미리보기
+                                                          └─ 기어 P ↔ D          → 운행 기록 (밤·비·고속도로·연속 운전·페달 안내)
+```
+
+지원하지 않는 차량 신호는 null로 남고, 그 신호를 쓰는 안내만 꺼집니다. 내비가 연결되지 않아도 페달 확인 안내는 그대로 동작합니다.
+
+## 7. 빌드·실행
+
+### 준비
+- JDK 17, Android SDK (compileSdk 35, minSdk 28)
+- Pleos Connect Emulator (API 34)와 Virtual Console
+- Pleos SDK는 `settings.gradle.kts`에 등록된 Pleos Maven 저장소에서 받습니다.
+
+### 환경 변수 (.env)
+루트에 `.env`를 만들고 Pleos Playground에서 발급받은 값을 넣습니다. 형식은 [`.env.example`](.env.example)을 보세요. `.env`는 `.gitignore`에 있어 커밋되지 않습니다.
+
+| 키 | 쓰는 곳 | 없으면 |
+| --- | --- | --- |
+| `PLEOS_CLIENT_ID`, `PLEOS_CLIENT_SECRET` | SpeechToText `registerApp` → HYBRID 인식 | ON_DEVICE 인식만 사용 |
+| `PLEOS_PROJECT_ID` | 설정 화면 표시 | — |
+| `PLEOS_CRN` | `scripts/set-devbox-crn.sh`가 에뮬레이터 VHAL에 주입 | 서버 음성 인식 연결 실패 |
+
+빌드할 때 `app/build.gradle.kts`가 `.env`를 읽어 `BuildConfig`에 넣습니다. 같은 이름의 환경 변수가 있으면 그 값이 먼저입니다.
+
+### 빌드와 설치
+
+```bash
+./gradlew testDebugUnitTest assembleDebug   # 테스트 + APK
+./scripts/set-devbox-crn.sh                 # 에뮬레이터를 새로 만들었을 때 한 번 (adb root → CRN 주입 → 재부팅)
+./scripts/run.sh                            # 빌드 → 설치(권한 자동 허용) → 실행
+```
+
+로그 보기:
+
+```bash
+adb logcat -s Companion VehicleGateway SpeedGateway NaviGateway SpeechGateway
+```
+
+## 8. 시연 방법
+
+### Virtual Console로
+1. 앱을 켜고 "내 약속"에서 약속을 고른 뒤 "이대로 시작하기"
+2. 기어 **R**, 브레이크 **끔**
+3. 차속을 1초 안에 2 → 16 km/h로 올림
+4. "지금 엑셀이에요! 브레이크로 바꾸세요" 음성과 빨간 전체 화면 경고
+
+브레이크를 **켠 채** 속도를 올리면 "브레이크 끝까지 꾹 밟으세요", 정차(0km/h) 직후 브레이크 없이 1초 만에 15km/h로 올리면 "엑셀 밟고 계세요, 발 확인하세요"가 나옵니다.
+
+### Virtual Console 없이
+"설정·시연" 탭의 버튼 3개가 같은 신호를 앱 안에서 재현합니다. 실제 신호와 같은 판단 로직을 거칩니다. 시연 값은 운행 기록과 깜짝 지점에 남지 않습니다.
+
+| 시연 | 흐름 |
+| --- | --- |
+| 주차장 후진 중 페달 혼동 | 주차장 안내 → 정차 → R → 브레이크 없이 2→16km/h → "지금 엑셀이에요" |
+| 브레이크를 덜 밟음 | 25km/h 주행 → 브레이크 밟았는데 34km/h까지 오름 → "브레이크 끝까지" |
+| 정차 후 급출발 | 정차 → 브레이크 떼고 1초 만에 15km/h → "발 확인하세요" |
+
+### 출발 전 브리핑
+기본 내비에서 목적지를 정하면(또는 "집에 가자") 경로 시작 직후 해 지기 전 도착 여부와 경로 미리보기를 말합니다. "오늘" 화면의 "출발 전 확인" 버튼으로 언제든 다시 들을 수 있습니다.
+
+## 9. 테스트
+
+```bash
+./gradlew testDebugUnitTest
+```
+
+판단 로직 단위 테스트 30개 ([app/src/test](app/src/test/java/com/yikihyub/drivingpromise/domain)):
+
+- `PedalGuardTest`: 후진 중 엑셀, 보통 출발은 조용, 급출발, 브레이크 덜 밟음, 정상 감속, 고속도로 합류는 조용, 일반 도로 극단 가속, 쿨다운, 민감도, P 기어
+- `PromisesTest`: 서울 동지·하지 일몰 시각, 시나리오 2 일몰 비교, 늦는 경우, 이미 해 진 경우, 말로 약속 정하기, 비 오는 날, 음성 명령, 시각 읽기
+- `CoachTest`: 좌회전 미리 알림 한 번만, 깜빡이 미점등/계속 점등, 회전교차로 출구, 사고다발 구간, 1시간마다 쉬기, 와이퍼, 경로 미리보기, 차 상태 문장, 시나리오 3 월간 요약, 깜짝 지점 합치기
+
+## 10. 개인정보와 안전 원칙
+
+- **차량을 제어하지 않습니다.** 모든 기능은 음성·화면 안내입니다.
+- **운행 기록은 차 안에만 저장합니다.** 운행 기록, 깜짝 지점, 방문 횟수는 앱 내부 파일에 있고 서버로 보내지 않습니다.
+- **가족 공유는 본인이 켤 때만** 월간 요약 한 줄을 보냅니다. 위치와 운행 상세는 보내지 않습니다. (전송 서버는 3단계, 현재는 미리보기만)
+- **점수를 매기거나 남과 비교하지 않습니다.** 인지 기능 진단도 넣지 않습니다. 의료적 판단이 아니고, 운전자에게 상처를 주지 않기 위해서입니다.
+- **주행 중에는 화면 조작을 막고** 큰 버튼과 음성만 남깁니다.
+
+## 11. 알려진 제약
+
+SDK 문서와 실제 API(jar)를 확인한 결과, 기획서와 달라진 부분입니다.
+
+| 항목 | 내용 | 대응 |
+| --- | --- | --- |
+| 가속 페달 신호 | Pleos Vehicle SDK에 없음 | 차속 변화 + 브레이크 상태로 간접 판단 |
+| 차속 | Pleos Vehicle SDK에 없음 | AAOS `PERF_VEHICLE_SPEED` (런타임 권한), 없으면 위치 변화로 계산 |
+| 타이어 공기압 | `getLowTirePressure`는 현재 공기압이 아니라 저압 **임계값**을 줌 | 차 상태 한마디에서 제외 |
+| 경고등 | `PRIVATE_CAR_SAFETY`(signature\|privileged) 권한이 필요해 일반 앱에서는 보통 비어 있음 | 읽히는 경우에만 표시 |
+| 고속도로 회피 | NaviHelper 경로 옵션에 "고속도로 회피"가 없음 | 무료도로 우선(FREE)으로 대신 |
+| 에뮬레이터 마이크 | 마이크 입력이 없으면 STT가 끝나지 않음 | 8초 타임아웃 후 부분 결과 사용 |
+
+## 12. 다음 단계
+
+| 단계 | 범위 |
+| --- | --- |
+| 1단계 (구현, 에뮬레이터 검증 전) | 페달 확인 안내, 약속 설정, 해 지기 전 도착 확인, 오늘의 차 상태, 주차장 천천히 |
+| 2단계 (구현, 에뮬레이터 검증 전) | 좌회전·방향지시등·비·전조등 안내, 깜짝 지점, 이달의 약속, 주의구간, 시연 모드 |
+| 3단계 | 가족 공유 서버, 음성 명령 확장, 페달 안내 기준값 실차 튜닝, 동승자 감지(Seat 점유) |
+| 확장 | 조건부 면허용 약속 이행 확인서, 보험 특약 연계, 정차 중 차량 제어(성에 제거·좌석 복원 등) |
