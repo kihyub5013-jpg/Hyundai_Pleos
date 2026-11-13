@@ -51,3 +51,4 @@ source ~/android-sdk/env.sh
 - 차속은 Pleos Vehicle 에 없어 AAOS `PERF_VEHICLE_SPEED`(CAR_SPEED 런타임 권한). 못 쓰면 위치 변화로 계산한 속도로 대신한다.
 - 가족 공유 서버는 3단계. 지금은 보낼 문장 미리보기만.
 # Hyundai_Pleos
+# Hyundai_Pleos
