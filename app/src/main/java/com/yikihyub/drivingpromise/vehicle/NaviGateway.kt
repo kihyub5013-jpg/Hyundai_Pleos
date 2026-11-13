@@ -231,6 +231,11 @@ class NaviGateway(context: Context) {
             type == TurnType.TURN_UTURN -> Turn.UTURN
             n.startsWith("TURN_ENTER_ROUNDABOUT") -> Turn.ROUNDABOUT
             n.startsWith("TURN_ENTER_IC") -> Turn.HIGHWAY_IN
+            type == TurnType.TURN_TUNNEL -> Turn.TUNNEL
+            type == TurnType.TURN_TOLL -> Turn.TOLL
+            type == TurnType.TURN_DEVIDE_MERGE -> Turn.MERGE
+            n.startsWith("TURN_ENTER_UNDER") -> Turn.UNDERPASS
+            type == TurnType.TURN_ENTER_SERVICEAREA || type == TurnType.TURN_RESTAREA -> Turn.REST_AREA
             type == TurnType.TURN_ARRIVE -> Turn.ARRIVE
             else -> Turn.OTHER
         }

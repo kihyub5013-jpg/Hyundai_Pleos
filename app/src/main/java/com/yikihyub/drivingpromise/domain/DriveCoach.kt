@@ -1,7 +1,7 @@
 package com.yikihyub.drivingpromise.domain
 
-/** 내비 회전 안내를 앱이 쓰는 종류로 줄인 것. */
-enum class Turn { LEFT, RIGHT, UTURN, ROUNDABOUT, HIGHWAY_IN, ARRIVE, OTHER }
+/** 내비 회전 안내(TBT)를 앱이 쓰는 종류로 줄인 것. 회전뿐 아니라 터널·톨게이트·지하차도 같은 "곧 만나는 곳"도 온다. */
+enum class Turn { LEFT, RIGHT, UTURN, ROUNDABOUT, HIGHWAY_IN, TUNNEL, TOLL, MERGE, UNDERPASS, REST_AREA, ARRIVE, OTHER }
 
 /** 내비 회전 안내 한 건. [exitClock] 은 회전교차로 진출 방향(2·3·4·6·8·9·10·12시). */
 data class TurnInfo(val turn: Turn, val distanceM: Double, val description: String = "", val exitClock: Int? = null)
@@ -38,6 +38,11 @@ class DriveCoach {
         const val PARKING_PREVIEW_M = 300
         const val HEADLIGHT_REMIND_MS = 10 * 60_000L
         const val REST_EVERY_MIN = 60
+        const val PLACE_PREVIEW_M = 300.0
+        const val TOLL_PREVIEW_M = 500.0
+        const val REST_AREA_PREVIEW_M = 1500.0
+        /** 이만큼 쉬지 않고 달렸으면 휴게소·졸음쉼터 앞에서 들르자고 말한다 */
+        const val REST_AREA_SUGGEST_MIN = 50
     }
 
     /** 한 번 가본 길이면 회전 미리 알림을 줄인다 (사고 다발·스쿨존 같은 위험 안내는 유지). */
@@ -55,6 +60,7 @@ class DriveCoach {
     private var lastHeadlightRemind: Long? = null
     private var restSaidAtMin = 0
     private var wiperOn = false
+    private var drivingMin = 0
 
     fun resetTrip() {
         previewedTurns.clear(); remindedSignal.clear(); previewedCautions.clear()
@@ -72,8 +78,15 @@ class DriveCoach {
                     "${roundM(t.distanceM)}미터 앞에서 ${if (t.turn == Turn.LEFT) "좌회전" else "유턴"}이에요. 미리 왼쪽 차로로 가 있어요."
                 t.turn == Turn.ROUNDABOUT && t.distanceM <= ROUNDABOUT_PREVIEW_M ->
                     "곧 회전교차로예요. 들어가기 전에 멈추고 왼쪽 차를 먼저 보내세요." + (t.exitClock?.let { " ${clockToExit(it)}로 나가요." } ?: "")
+                t.turn == Turn.MERGE && t.distanceM <= PLACE_PREVIEW_M ->
+                    "곧 길이 갈라지거나 합쳐져요. 차로를 미리 정하고, 옆 차가 들어오면 먼저 보내세요."
                 else -> null
             }
+            if (say != null) { previewedTurns += key; return say }
+        }
+        // 1-1) 곧 만나는 곳: 위험 안내라 가본 길이어도 말한다
+        if (key !in previewedTurns) {
+            val say = placeSpeech(t)
             if (say != null) { previewedTurns += key; return say }
         }
         // 2) 회전 직전인데 깜빡이 안 켬
@@ -85,6 +98,20 @@ class DriveCoach {
             }
         }
         return null
+    }
+
+    /** 터널·톨게이트·지하차도·휴게소처럼 "곧 만나는 곳" 안내. 해당 없으면 null. */
+    private fun placeSpeech(t: TurnInfo): String? = when {
+        t.turn == Turn.TUNNEL && t.distanceM <= PLACE_PREVIEW_M ->
+            "곧 터널이에요. 전조등을 켜고, 터널 안에서는 차로를 바꾸지 마세요."
+        t.turn == Turn.UNDERPASS && t.distanceM <= PLACE_PREVIEW_M ->
+            if (wiperOn) "곧 지하차도예요. 비가 많이 오면 물이 찰 수 있어요. 물이 보이면 들어가지 말고 돌아가세요."
+            else "곧 지하차도예요. 들어가면 어두워져요. 속도를 줄이세요."
+        t.turn == Turn.TOLL && t.distanceM <= TOLL_PREVIEW_M ->
+            "곧 톨게이트예요. 하이패스 차로인지 확인하고, 미리 속도를 줄이세요."
+        t.turn == Turn.REST_AREA && t.distanceM <= REST_AREA_PREVIEW_M && drivingMin >= REST_AREA_SUGGEST_MIN ->
+            "${drivingMin}분째 운전 중이에요. 앞에 쉴 곳이 있어요. 잠깐 들렀다 가요."
+        else -> null
     }
 
     fun onSignal(s: Signal, nowMs: Long) {
@@ -145,6 +172,7 @@ class DriveCoach {
 
     /** 연속 주행 시간(분). 1시간마다 쉬기 약속 */
     fun onDrivingMinutes(min: Int, promises: Set<Promise>): String? {
+        drivingMin = min
         if (Promise.REST_HOURLY !in promises) return null
         val due = (min / REST_EVERY_MIN) * REST_EVERY_MIN
         if (due >= REST_EVERY_MIN && due > restSaidAtMin) {
@@ -180,4 +208,41 @@ object RoutePreview {
         if (parts.isEmpty()) return null
         return "가는 길에 ${parts.joinToString(", ")}이 있어요. 가까워지면 미리 알려드릴게요."
     }
+}
+
+/** 화면 "곧 만나는 곳" 카드에 띄울 상황 종류. 안내 문장은 DriveCoach 가 만든다. */
+enum class SituationKind(val title: String) {
+    LEFT_TURN("좌회전"), UTURN("유턴"), ROUNDABOUT("회전교차로"), MERGE("갈림길·합류"),
+    TUNNEL("터널"), UNDERPASS("지하차도"), TOLL("톨게이트"), REST_AREA("쉴 곳"),
+    ACCIDENT("사고가 잦은 곳"), SCHOOL("어린이 보호구역"), RAILROAD("철길 건널목"), BUMP("과속방지턱"),
+    FOG("안개 구간"), DOWNHILL("긴 내리막"), NARROW("좁은 길"), SLIPPERY("미끄러운 길"), WRONG_WAY("역주행 알림"),
+    SIGNAL("방향지시등"), RAIN("비"), DUSK("해 진 뒤"), REST("쉬어 가기"), PARKING("주차장"), SPOT("깜짝 지점"),
+}
+
+/** 지금 안내 중인 상황 한 건. [distanceM] 은 남은 거리(모르면 null). */
+data class Situation(val kind: SituationKind, val speech: String, val distanceM: Int?, val atMs: Long)
+
+fun TurnInfo.situationKind(): SituationKind? = when (turn) {
+    Turn.LEFT -> SituationKind.LEFT_TURN
+    Turn.UTURN -> SituationKind.UTURN
+    Turn.ROUNDABOUT -> SituationKind.ROUNDABOUT
+    Turn.MERGE -> SituationKind.MERGE
+    Turn.TUNNEL -> SituationKind.TUNNEL
+    Turn.UNDERPASS -> SituationKind.UNDERPASS
+    Turn.TOLL -> SituationKind.TOLL
+    Turn.REST_AREA -> SituationKind.REST_AREA
+    else -> null
+}
+
+fun Caution.situationKind(): SituationKind? = when (this) {
+    Caution.ACCIDENT_PRONE -> SituationKind.ACCIDENT
+    Caution.SCHOOL_ZONE -> SituationKind.SCHOOL
+    Caution.RAILROAD -> SituationKind.RAILROAD
+    Caution.SPEED_BUMP -> SituationKind.BUMP
+    Caution.FOG -> SituationKind.FOG
+    Caution.DOWNHILL -> SituationKind.DOWNHILL
+    Caution.NARROW -> SituationKind.NARROW
+    Caution.SLIPPERY -> SituationKind.SLIPPERY
+    Caution.WRONG_WAY -> SituationKind.WRONG_WAY
+    Caution.OTHER -> null
 }

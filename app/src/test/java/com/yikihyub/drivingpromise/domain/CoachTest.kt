@@ -93,4 +93,31 @@ class CoachTest {
         assertEquals(1, SurpriseSpot.merge(listOf(a), near).size)
         assertEquals(2, SurpriseSpot.merge(listOf(a), far).size)
     }
+
+    @Test fun `터널·톨게이트·지하차도는 가본 길이어도 한 번 안내`() {
+        val c = DriveCoach().apply { familiarRoute = true }
+        assertNull(c.onTurn(TurnInfo(Turn.TUNNEL, 600.0, "t"), 50f))
+        assertTrue(c.onTurn(TurnInfo(Turn.TUNNEL, 280.0, "t"), 50f)!!.contains("전조등"))
+        assertNull(c.onTurn(TurnInfo(Turn.TUNNEL, 100.0, "t"), 50f))
+        assertTrue(c.onTurn(TurnInfo(Turn.TOLL, 450.0, "g"), 50f)!!.contains("하이패스"))
+    }
+
+    @Test fun `비 오는 날 지하차도는 침수 경고`() {
+        val c = DriveCoach()
+        c.onWiper(true, true)
+        assertTrue(c.onTurn(TurnInfo(Turn.UNDERPASS, 250.0, "u"), 40f)!!.contains("물"))
+    }
+
+    @Test fun `오래 달렸을 때만 휴게소 들르자고`() {
+        val c = DriveCoach()
+        assertNull(c.onTurn(TurnInfo(Turn.REST_AREA, 1200.0, "r"), 80f))
+        c.onDrivingMinutes(55, emptySet())
+        assertTrue(c.onTurn(TurnInfo(Turn.REST_AREA, 1100.0, "r2"), 80f)!!.contains("55분째"))
+    }
+
+    @Test fun `상황 종류 매핑`() {
+        assertEquals(SituationKind.ROUNDABOUT, TurnInfo(Turn.ROUNDABOUT, 1.0).situationKind())
+        assertEquals(SituationKind.SCHOOL, Caution.SCHOOL_ZONE.situationKind())
+        assertNull(Caution.OTHER.situationKind())
+    }
 }

@@ -1,17 +1,17 @@
 package com.yikihyub.drivingpromise.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,185 +23,186 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.outlined.AltRoute
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LocalCafe
+import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.Umbrella
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.yikihyub.drivingpromise.domain.Promise
 import com.yikihyub.drivingpromise.ui.theme.Pleos
+import com.yikihyub.drivingpromise.ui.theme.PleosStatic
 
-/* Pleos 기본 앱 톤의 공용 조각들. 색·크기는 theme/Theme.kt 의 Pleos 토큰만 쓴다. */
-
-/**
- * 좁은 창 여부. Pleos는 내비와 나란히 두 앱을 띄울 수 있어(Connect-W 2분할) 앱 폭이 절반(약 850px)이 된다.
- * 그때는 메뉴를 아이콘만 남기고, 긴 행은 두 줄로 쌓는다.
+/*
+ * Pleos Connect 기본 앱 문법의 공용 조각. 색은 theme/Theme.kt 의 Pleos 토큰만 쓴다.
+ * 터치 영역은 최소 88dp 높이 (Android 48dp 기준보다 넉넉하게: 움직이는 차 안, 한 손 조작).
  */
+
+/** 좁은 창(2분할 절반, 세로 창). 이때 메뉴는 아이콘만, 가로 배치는 세로로 쌓는다. */
 val LocalCompact = androidx.compose.runtime.compositionLocalOf { false }
 
-/** 페이지 제목 줄. 오른쪽에 상태 표시 등을 끼울 수 있다. */
+/** 화면 여백. 넓은 창 48, 좁은 창 28 */
+val gutter: Dp @Composable get() = if (LocalCompact.current) 28.dp else 48.dp
+
+/** 약속마다 같은 아이콘을 앱 전체에서 쓴다 (Pleos: 아이콘 + 글자 라벨, 일관성) */
+val Promise.icon: ImageVector
+    get() = when (this) {
+        Promise.NO_NIGHT -> Icons.Outlined.DarkMode
+        Promise.AVOID_HIGHWAY -> Icons.Outlined.AltRoute
+        Promise.RAIN_NEAR_ONLY -> Icons.Outlined.Umbrella
+        Promise.REST_HOURLY -> Icons.Outlined.LocalCafe
+        Promise.NIGHT_WITH_COMPANION -> Icons.Outlined.People
+    }
+
+/** 화면 제목. 부제는 한 줄. */
 @Composable
-fun PageHeader(title: String, trailing: @Composable RowScope.() -> Unit = {}) {
+fun PageHeader(title: String, subtitle: String? = null, trailing: @Composable RowScope.() -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 20.dp),
+        Modifier.fillMaxWidth().padding(start = gutter, end = gutter, top = 36.dp, bottom = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.weight(1f))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineLarge, color = Pleos.ink)
+            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Pleos.ink3)
+        }
         trailing()
     }
 }
 
-/** 차량 설정의 "도어 · 잠김" 같은 상태 표시. 점 + 라벨. */
+/** 섹션 제목: 목록·묶음 위의 작은 제목. 위 여백이 아래보다 크다. */
 @Composable
-fun StatusDot(label: String, on: Boolean, onClick: (() -> Unit)? = null) {
-    Row(
-        Modifier
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(Modifier.size(12.dp).background(if (on) Pleos.ok else Pleos.ink3, CircleShape))
-        if (!LocalCompact.current) Text(label, style = MaterialTheme.typography.bodyMedium, color = if (on) Pleos.ink else Pleos.ink2)
-    }
+fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+        color = Pleos.ink2,
+        modifier = modifier.padding(start = gutter, end = gutter, top = 40.dp, bottom = 16.dp),
+    )
 }
 
-/** 얇은 선으로 나뉜 타일 한 칸 (차량 설정의 "모든 창문 / 닫힘"). */
+/** 면: Pleos surface_basic 위의 둥근 판. 그림자 레벨 1 (y6 blur24 8%). */
 @Composable
-fun Tile(
-    title: String,
-    value: String,
+fun Panel(
     modifier: Modifier = Modifier,
-    valueColor: Color = Pleos.ink,
-    caption: String? = null,
-    selected: Boolean = false,
+    color: Color = Pleos.surface,
+    padding: Dp = 32.dp,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier
-            .background(if (selected) Pleos.surface else Color.Transparent)
-            .padding(horizontal = if (LocalCompact.current) 20.dp else 32.dp, vertical = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(title, style = MaterialTheme.typography.bodyMedium, color = Pleos.ink2)
-        Text(
-            value,
-            style = if (LocalCompact.current) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
-            color = valueColor, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
-        if (caption != null) Text(caption, style = MaterialTheme.typography.bodySmall, color = Pleos.ink2)
-    }
-}
-
-/** 타일을 가로로 늘어놓고 사이에 세로선, 위아래에 가로선. */
-@Composable
-fun TileRow(modifier: Modifier = Modifier, tiles: List<@Composable (Modifier) -> Unit>) {
-    Column(modifier) {
-        HorizontalDivider(color = Pleos.line)
-        Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
-            tiles.forEachIndexed { i, tile ->
-                tile(Modifier.weight(1f).fillMaxHeight())
-                if (i < tiles.lastIndex) VerticalDivider(color = Pleos.line)
-            }
-        }
-        HorizontalDivider(color = Pleos.line)
-    }
-}
-
-/** 연한 회색 블록. 안내문·강조 영역. */
-@Composable
-fun Block(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier.background(Pleos.surface, MaterialTheme.shapes.large).padding(32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .shadow(if (Pleos.c.dark) 0.dp else 12.dp, MaterialTheme.shapes.large, ambientColor = Color(0x14000000), spotColor = Color(0x14000000))
+            .clip(MaterialTheme.shapes.large)
+            .background(color)
+            .padding(padding),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         content = content,
     )
 }
 
-/** 검정 주요 버튼 (Pleos basic button). */
+/** 점 + 낱말 상태 표시. 색만으로 뜻을 전하지 않는다. */
 @Composable
-fun PrimaryButton(
+fun StatePill(label: String, color: Color, modifier: Modifier = Modifier, filled: Boolean = false) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (filled) color.copy(alpha = 0.14f) else Pleos.surfaceHigh)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(12.dp).background(color, CircleShape))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = Pleos.ink)
+    }
+}
+
+/** 버튼 공통: Pleos basic button (Pressed / Disabled 상태) */
+@Composable
+private fun PleosButtonBase(
     text: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    icon: ImageVector? = null,
-    tall: Boolean = false,
+    modifier: Modifier,
+    enabled: Boolean,
+    icon: ImageVector?,
+    container: Color,
+    pressedContainer: Color,
+    content: Color,
+    height: Dp,
+    textStyle: androidx.compose.ui.text.TextStyle,
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(if (tall) 96.dp else 72.dp),
-        shape = MaterialTheme.shapes.medium,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Pleos.black, contentColor = Color.White,
-            disabledContainerColor = Pleos.surface, disabledContentColor = Pleos.ink3,
-        ),
-        contentPadding = PaddingValues(horizontal = 32.dp),
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val bg = when {
+        !enabled -> Pleos.surfaceHigh
+        pressed -> pressedContainer
+        else -> container
+    }
+    val fg = if (enabled) content else Pleos.ink4
+    Row(
+        modifier
+            .defaultMinSize(minHeight = height)
+            .clip(MaterialTheme.shapes.medium)
+            .background(bg)
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 32.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        if (icon != null) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(14.dp)) }
-        Text(text, style = if (tall) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelLarge)
+        if (icon != null) { Icon(icon, null, Modifier.size(34.dp), tint = fg); Spacer(Modifier.width(14.dp)) }
+        Text(text, style = textStyle, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
-/** 흰 바탕 테두리 버튼. */
+/** 채운 버튼 (button_filled). 화면당 하나의 주된 동작에만. */
 @Composable
-fun SecondaryButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    icon: ImageVector? = null,
-    tall: Boolean = false,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.height(if (tall) 96.dp else 72.dp),
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(2.dp, if (enabled) Pleos.ink else Pleos.line),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = Pleos.ink, disabledContentColor = Pleos.ink3),
-        contentPadding = PaddingValues(horizontal = 32.dp),
-    ) {
-        if (icon != null) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(14.dp)) }
-        Text(text, style = if (tall) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelLarge)
-    }
-}
+fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, tall: Boolean = false) =
+    PleosButtonBase(
+        text, onClick, modifier, enabled, icon,
+        container = Pleos.filled, pressedContainer = Pleos.filled.copy(alpha = 0.82f), content = Pleos.onFilled,
+        height = if (tall) 112.dp else 88.dp,
+        textStyle = if (tall) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelLarge,
+    )
 
-/** 마이크 버튼. 듣는 중이면 파란 테두리로 바뀐다. */
+/** 기본 버튼 (button_basic): 옅은 회색 면, 테두리 없음. */
 @Composable
-fun MicButton(text: String, listening: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, primary: Boolean = true) {
-    if (listening) {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = modifier.height(96.dp),
-            shape = MaterialTheme.shapes.medium,
-            border = BorderStroke(3.dp, Pleos.accent),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Pleos.accent),
-            contentPadding = PaddingValues(horizontal = 32.dp),
-        ) {
-            Icon(Icons.Filled.Mic, null, Modifier.size(30.dp)); Spacer(Modifier.width(14.dp))
-            Text("듣는 중 · 취소", style = MaterialTheme.typography.titleLarge)
-        }
-    } else if (primary) {
-        PrimaryButton(text, onClick, modifier, enabled, Icons.Filled.Mic, tall = true)
-    } else {
-        SecondaryButton(text, onClick, modifier, enabled, Icons.Filled.Mic, tall = true)
-    }
-}
+fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: ImageVector? = null, tall: Boolean = false) =
+    PleosButtonBase(
+        text, onClick, modifier, enabled, icon,
+        container = Pleos.surfaceHigh, pressedContainer = Pleos.surfaceAccent, content = Pleos.ink,
+        height = if (tall) 112.dp else 88.dp,
+        textStyle = if (tall) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelLarge,
+    )
 
-/** 세그먼트 메뉴 (차량 설정 전조등 "끄기 | 자동 | …"). 선택 = 검정. */
+/** 말하기 버튼. 듣는 중이면 파랑(informative_positive)으로 바뀌고 누르면 취소. */
+@Composable
+fun MicButton(text: String, listening: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) =
+    PleosButtonBase(
+        if (listening) "듣고 있어요 · 누르면 취소" else text, onClick, modifier, true, Icons.Filled.Mic,
+        container = if (listening) Pleos.info else Pleos.filled,
+        pressedContainer = if (listening) Pleos.info.copy(alpha = 0.85f) else Pleos.filled.copy(alpha = 0.82f),
+        content = if (listening) Color.White else Pleos.onFilled,
+        height = 112.dp, textStyle = MaterialTheme.typography.titleLarge,
+    )
+
+/** 세그먼트: 둥근 홈 안에서 선택된 칸만 흰 판으로 떠오른다 (Pleos 차량 설정의 선택 컨트롤). */
 @Composable
 fun <T> Segmented(
     options: List<T>,
@@ -210,117 +211,88 @@ fun <T> Segmented(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    height: Int = 72,
 ) {
     Row(
-        modifier
-            .border(2.dp, Pleos.line, MaterialTheme.shapes.medium)
-            .padding(2.dp)
-            .height(height.dp),
+        modifier.clip(MaterialTheme.shapes.medium).background(Pleos.surfaceHigh).padding(6.dp).height(88.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        options.forEachIndexed { i, o ->
+        options.forEach { o ->
             val sel = o == selected
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(if (sel) Pleos.black else Color.Transparent, RoundedCornerShape(10.dp))
-                    .clickable(enabled = enabled) { onSelect(o) },
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (sel) Pleos.surface else Color.Transparent)
+                    .clickable(enabled = enabled, role = Role.RadioButton) { onSelect(o) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label(o),
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (sel) Color.White else if (enabled) Pleos.ink else Pleos.ink3,
+                    color = if (!enabled) Pleos.ink4 else if (sel) Pleos.ink else Pleos.ink3,
                 )
-            }
-            if (i < options.lastIndex && !sel && options.getOrNull(i + 1) != selected) {
-                VerticalDivider(Modifier.padding(vertical = 16.dp), color = Pleos.line)
             }
         }
     }
 }
 
-/** 작은 칩 — 결제수단·상태 라벨. 눌러서 고르는 용도면 selected 로 검정. */
+/** Pleos 톤 스위치: 켜짐 = 초록(informative_active) */
 @Composable
-fun Chip(text: String, selected: Boolean = false, onClick: (() -> Unit)? = null, color: Color? = null) {
-    val bg = if (selected) Pleos.black else Color.Transparent
-    val fg = color ?: if (selected) Color.White else Pleos.ink
-    Box(
-        Modifier
-            .border(2.dp, if (selected) Pleos.black else Pleos.line, RoundedCornerShape(50))
-            .background(bg, RoundedCornerShape(50))
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 22.dp, vertical = 10.dp),
-    ) { Text(text, style = MaterialTheme.typography.labelMedium, color = fg) }
+fun PleosSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Switch(
+        checked = checked,
+        onCheckedChange = onChange,
+        colors = SwitchDefaults.colors(
+            checkedTrackColor = Pleos.kept, checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
+            uncheckedTrackColor = Pleos.surfaceAccent, uncheckedThumbColor = Color.White, uncheckedBorderColor = Color.Transparent,
+        ),
+    )
 }
 
-/** 리스트 한 줄: 제목 / 부제 / 오른쪽 값. 아래에 구분선. */
+/** 목록 한 줄: 제목 / 부제 / 오른쪽. 아래에 구분선. */
 @Composable
 fun ListRow(
     title: String,
     subtitle: String? = null,
+    leading: ImageVector? = null,
+    onClick: (() -> Unit)? = null,
     trailing: @Composable RowScope.() -> Unit = {},
-    below: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 24.dp),
+            Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+                .padding(horizontal = gutter, vertical = 26.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
         ) {
+            if (leading != null) Icon(leading, null, Modifier.size(36.dp), tint = Pleos.ink2)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Pleos.ink2)
-                if (below != null) { Spacer(Modifier.height(6.dp)); below() }
+                Text(title, style = MaterialTheme.typography.titleMedium, color = Pleos.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Pleos.ink3, maxLines = 3)
             }
             trailing()
         }
-        HorizontalDivider(color = Pleos.line)
+        HorizontalDivider(Modifier.padding(horizontal = gutter), color = Pleos.line)
     }
 }
 
-/** 섹션 제목 (리스트 위 작은 회색 제목). */
-@Composable
-fun SectionTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = Pleos.ink2,
-        modifier = Modifier.padding(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 10.dp),
-    )
-}
-
-/** Pleos 토스트: 화면 아래 가운데, 검정 둥근 상자, 최대 792. 듣는 중엔 파란 마이크. */
+/** Pleos 토스트: 아래 가운데, 어두운 고정색 판, 최대 폭 800. 차가 방금 한 말을 보여준다. */
 @Composable
 fun PleosToast(text: String, listening: Boolean, modifier: Modifier = Modifier) {
-    Surface(
-        color = Pleos.black,
-        contentColor = Color.White,
-        shape = MaterialTheme.shapes.large,
-        modifier = modifier.widthIn(max = 792.dp),
+    Row(
+        modifier
+            .widthIn(max = 800.dp)
+            .shadow(20.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x3D000000), spotColor = Color(0x3D000000))
+            .clip(RoundedCornerShape(24.dp))
+            .background(PleosStatic.dark)
+            .padding(horizontal = 32.dp, vertical = 24.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.padding(horizontal = 32.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (listening) { Icon(Icons.Filled.Mic, null, Modifier.size(28.dp), tint = Pleos.accent); Spacer(Modifier.width(14.dp)) }
-            Text(text, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
-        }
+        Icon(Icons.Filled.Mic, null, Modifier.size(30.dp), tint = if (listening) Color(0xFF0082FF) else PleosStatic.light3)
+        Spacer(Modifier.width(18.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = PleosStatic.light, maxLines = 3)
     }
-}
-
-/** Pleos 톤 텍스트필드: 얇은 회색 테두리, 포커스 시 검정. */
-@Composable
-fun PleosField(value: String, onValue: (String) -> Unit, label: String, modifier: Modifier = Modifier, number: Boolean = false) {
-    androidx.compose.material3.OutlinedTextField(
-        value = value,
-        onValueChange = onValue,
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = if (number) androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number) else androidx.compose.foundation.text.KeyboardOptions.Default,
-        shape = MaterialTheme.shapes.medium,
-        textStyle = MaterialTheme.typography.bodyLarge,
-        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Pleos.ink, unfocusedBorderColor = Pleos.line,
-            focusedLabelColor = Pleos.ink2, unfocusedLabelColor = Pleos.ink2, cursorColor = Pleos.ink,
-        ),
-        modifier = modifier,
-    )
 }

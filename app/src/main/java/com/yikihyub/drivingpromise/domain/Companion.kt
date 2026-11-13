@@ -55,6 +55,7 @@ enum class DemoScenario(val title: String) {
     PARKING_PEDAL("주차장 후진 중 페달 혼동"),
     BRAKE_WEAK("브레이크를 덜 밟음"),
     LAUNCH("정차 후 급출발"),
+    ROUTE("길 안내 따라가기 · 회전교차로·스쿨존·터널·사고다발"),
 }
 
 /**
@@ -95,6 +96,10 @@ class DrivingCompanion(
     private val _sensitive = MutableStateFlow(false)
     val sensitive: StateFlow<Boolean> = _sensitive.asStateFlow()
 
+    /** 화면 "곧 만나는 곳" 카드: 방금 안내한 상황. 1분 지나거나 지나치면 사라진다. */
+    private val _ahead = MutableStateFlow<Situation?>(null)
+    val ahead: StateFlow<Situation?> = _ahead.asStateFlow()
+
     private val _parkedAt = MutableStateFlow<String?>(null)
     val parkedAt: StateFlow<String?> = _parkedAt.asStateFlow()
 
@@ -126,31 +131,23 @@ class DrivingCompanion(
         jobs += scope.launch {
             vehicle.wiperOn.filterNotNull().distinctUntilChanged().collect { on ->
                 if (on) _trip.value?.let { _trip.value = it.copy(rain = true) }
-                coach.onWiper(on, vehicle.lowBeamOn.value)?.let(::say)
+                coach.onWiper(on, vehicle.lowBeamOn.value)?.let { say(it); show(SituationKind.RAIN, it) }
                 if (on) DepartureCheck.rain(store.settings.value.promises, true, navi.destination.value?.remainDistanceM?.div(1000.0))?.let(::say)
             }
         }
         jobs += scope.launch {
             vehicle.drivingMinutes.filterNotNull().collect { min ->
                 _trip.value?.let { if (min > it.longestStintMin) _trip.value = it.copy(longestStintMin = min) }
-                coach.onDrivingMinutes(min, store.settings.value.promises)?.let(::say)
+                coach.onDrivingMinutes(min, store.settings.value.promises)?.let { say(it); show(SituationKind.REST, it) }
             }
         }
-        jobs += scope.launch {
-            navi.turns.collect { turns ->
-                val next = turns.firstOrNull() ?: return@collect
-                if (next.turn == Turn.HIGHWAY_IN && next.distanceM < 100) _trip.value?.let { _trip.value = it.copy(highway = true) }
-                coach.onTurn(next, _speedKmh.value)?.let(::say)
-            }
-        }
-        jobs += scope.launch {
-            navi.cautions.collect { list -> list.forEach { c -> coach.onCaution(c.caution, c.remainM, c.id)?.let(::say) } }
-        }
+        jobs += scope.launch { navi.turns.collect { if (_demo.value == null) onTurns(it) } }
+        jobs += scope.launch { navi.cautions.collect { list -> if (_demo.value == null) list.forEach { onCaution(it.caution, it.remainM, it.id) } } }
         jobs += scope.launch {
             navi.destination.collect { d ->
                 if (d == null) return@collect
                 coach.familiarRoute = store.visitCount(d.name) > 0
-                coach.onRemainDistance(d.remainDistanceM)?.let(::say)
+                coach.onRemainDistance(d.remainDistanceM)?.let { say(it); show(SituationKind.PARKING, it, d.remainDistanceM) }
                 _trip.value?.let { if (it.destination != d.name) _trip.value = it.copy(destination = d.name) }
             }
         }
@@ -158,6 +155,36 @@ class DrivingCompanion(
         jobs += scope.launch { store.spots.collect { watchSpots(it) } }
         location.onSpeed = { kmh, t -> speed.onLocationSpeed(kmh, t) }
     }
+
+    /** 내비 회전 안내가 갱신될 때 (실제 내비와 시연이 같은 길을 탄다) */
+    private fun onTurns(turns: List<TurnInfo>) {
+        val next = turns.firstOrNull() ?: return
+        if (next.turn == Turn.HIGHWAY_IN && next.distanceM < 100) _trip.value?.let { _trip.value = it.copy(highway = true) }
+        val said = coach.onTurn(next, _speedKmh.value)
+        val kind = next.situationKind()
+        if (said != null) {
+            say(said)
+            show(if (said.contains("깜빡이")) SituationKind.SIGNAL else kind ?: SituationKind.SIGNAL, said, next.distanceM.toInt())
+        } else if (kind != null && _ahead.value?.kind == kind) {
+            // 같은 곳에 다가가는 중: 남은 거리만 갱신
+            _ahead.value = _ahead.value?.copy(distanceM = next.distanceM.toInt())
+        }
+    }
+
+    private fun onCaution(c: Caution, remainM: Int, id: String) {
+        val said = coach.onCaution(c, remainM, id)
+        val kind = c.situationKind()
+        if (said != null) { say(said); kind?.let { show(it, said, remainM) } }
+        else if (kind != null && _ahead.value?.kind == kind) _ahead.value = _ahead.value?.copy(distanceM = remainM)
+    }
+
+    private fun show(kind: SituationKind, speech: String, distanceM: Int? = null) {
+        val s = Situation(kind, speech, distanceM, System.currentTimeMillis())
+        _ahead.value = s
+        scope.launch { delay(60_000); if (_ahead.value == s || _ahead.value?.atMs == s.atMs) _ahead.value = null }
+    }
+
+    fun dismissAhead() { _ahead.value = null }
 
     fun stop() { jobs.forEach { it.cancel() }; jobs.clear(); location.onSpeed = null }
 
@@ -191,11 +218,12 @@ class DrivingCompanion(
     // ───────────── 페달 확인 안내 ─────────────
 
     private var lastLoggedSpeed = -1f
+    @Volatile private var pedalPaused = false
 
     private suspend fun pedalLoop() {
         while (scope.isActive) {
             delay(100)
-            if (!store.settings.value.pedalGuard) continue
+            if (!store.settings.value.pedalGuard || pedalPaused) { if (demoSpeed != null) _speedKmh.value = demoSpeed!!; continue }
             val now = System.currentTimeMillis()
             val gear = demoGear ?: vehicle.gear.value
             if (demoGear == null && gear == Gear.UNKNOWN && !vehicle.connected.value && demoSpeed == null) continue
@@ -236,7 +264,7 @@ class DrivingCompanion(
     private fun watchSpots(spots: List<SurpriseSpot>) {
         if (!location.isStarted || spots.size == watched) return
         location.unwatchAll()
-        spots.forEach { s -> location.watch(s) { say("지난번 놀랐던 곳이에요. 천천히 가요.") } }
+        spots.forEach { s -> location.watch(s) { "지난번 놀랐던 곳이에요. 천천히 가요.".let { t -> say(t); show(SituationKind.SPOT, t) } } }
         watched = spots.size
     }
 
@@ -252,9 +280,9 @@ class DrivingCompanion(
             tick++
             val now = System.currentTimeMillis()
             val v = _speedKmh.value
-            coach.checkSignalLeftOn(now, v)?.let(::say)
+            coach.checkSignalLeftOn(now, v)?.let { say(it); show(SituationKind.SIGNAL, it) }
             val dark = isDark()
-            coach.checkHeadlight(dark, vehicle.lowBeamOn.value, v, now)?.let(::say)
+            coach.checkHeadlight(dark, vehicle.lowBeamOn.value, v, now)?.let { say(it); show(SituationKind.DUSK, it) }
             _trip.value?.let { if (dark && v > 5f && !it.night) _trip.value = it.copy(night = true) }
             if (_trip.value != null && tick % 2 == 0) navi.poll()
             // 연속 주행시간 신호(TRIP_DRIVING_TIME)가 없는 차는 운행 시작부터 센다 (1시간마다 쉬기)
@@ -262,7 +290,7 @@ class DrivingCompanion(
                 _trip.value?.let { t ->
                     val min = ((now - t.startMs) / 60_000).toInt()
                     if (min > t.longestStintMin) _trip.value = t.copy(longestStintMin = min)
-                    coach.onDrivingMinutes(min, store.settings.value.promises)?.let(::say)
+                    coach.onDrivingMinutes(min, store.settings.value.promises)?.let { say(it); show(SituationKind.REST, it) }
                 }
             }
         }
@@ -449,6 +477,7 @@ class DrivingCompanion(
                         demoBrake = true; ramp(25f, 34f, 2_500, brake = true) // 밟았는데 속도가 오름 (내리막·두 페달)
                         delay(1_000); ramp(34f, 0f, 3_000, brake = true)
                     }
+                    DemoScenario.ROUTE -> routeDemo()
                     DemoScenario.LAUNCH -> {
                         set(Gear.DRIVE, 0f, true); delay(2_000)
                         set(Gear.DRIVE, 0f, false); delay(300)
@@ -458,11 +487,38 @@ class DrivingCompanion(
                 }
                 delay(2_000)
             } finally {
+                pedalPaused = false
+                coach.resetTrip()
                 demoSpeed = null; demoBrake = null; demoGear = null; demoNearParking = false
                 _demo.value = null
                 guard.reset()
             }
         }
+    }
+
+    /**
+     * 길 안내 시연: 내비가 보내는 회전 안내·주의구간을 같은 처리 경로(onTurns/onCaution)로 흘려보낸다.
+     * 시속 40km 로 달리며 회전교차로 → 어린이 보호구역 → 터널 → 사고 잦은 교차로 → 좌회전(깜빡이) 순서.
+     */
+    private suspend fun routeDemo() {
+        pedalPaused = true // 길 안내 시연은 일정한 속도로 달리는 장면이라 페달 판단을 쉬게 한다
+        coach.resetTrip(); coach.familiarRoute = false
+        coach.onSignal(Signal.OFF, System.currentTimeMillis())
+        set(Gear.DRIVE, 40f, false)
+        say("길 안내 시연을 시작할게요.")
+        delay(2_500)
+        for (d in listOf(800.0, 620.0, 450.0)) { onTurns(listOf(TurnInfo(Turn.ROUNDABOUT, d, "회전교차로", 9))); delay(700) }
+        delay(6_500)
+        for (m in listOf(700, 500, 280)) { onCaution(Caution.SCHOOL_ZONE, m, "demo-school"); delay(700) }
+        delay(5_000)
+        for (d in listOf(600.0, 400.0, 280.0)) { onTurns(listOf(TurnInfo(Turn.TUNNEL, d, "터널"))); delay(700) }
+        delay(5_500)
+        for (m in listOf(500, 260)) { onCaution(Caution.ACCIDENT_PRONE, m, "demo-accident"); delay(700) }
+        delay(6_000)
+        for (d in listOf(500.0, 280.0)) { onTurns(listOf(TurnInfo(Turn.LEFT, d, "좌회전"))); delay(700) }
+        delay(5_000)
+        onTurns(listOf(TurnInfo(Turn.LEFT, 40.0, "좌회전")))
+        delay(4_000)
     }
 
     private fun set(g: Gear, v: Float, brake: Boolean) { demoGear = g; demoSpeed = v; demoBrake = brake }
