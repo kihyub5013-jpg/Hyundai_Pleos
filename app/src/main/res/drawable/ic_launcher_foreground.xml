@@ -1,0 +1,35 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 운행기록부: 장부 외곽선 + 세 줄, 오른쪽 아래 계기판 바늘 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:fillColor="#00000000"
+        android:pathData="M31,28h46a5,5 0 0 1 5,5v42a5,5 0 0 1 -5,5H31a5,5 0 0 1 -5,-5V33a5,5 0 0 1 5,-5z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M38,44h32 M38,55h32 M38,66h14" />
+    <path
+        android:fillColor="#1C1C1E"
+        android:pathData="M72,74m-15,0a15,15 0 1 1 30,0a15,15 0 1 1 -30,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:fillColor="#00000000"
+        android:pathData="M72,74m-12,0a12,12 0 1 1 24,0a12,12 0 1 1 -24,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M72,74L80,66" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,74m-3,0a3,3 0 1 1 6,0a3,3 0 1 1 -6,0" />
+</vector>
