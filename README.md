@@ -6,6 +6,18 @@
 
 운전을 그만두게 하는 앱이 아니라, 계속 운전하면서 위험한 순간과 조건을 줄이도록 돕는 "셀프 조건부 운전" 앱입니다.
 
+## 제출 정보
+
+| 항목 | 내용 |
+| --- | --- |
+| 앱 이름 | 내 운전 약속 |
+| 한 줄 소개 | 고령 운전자가 스스로 정한 운전 조건을 차가 함께 지키고, 브레이크 대신 가속 페달을 밟은 순간을 음성으로 알려 주는 Pleos Connect 앱 |
+| 팀 | 이기협 (개인) |
+| APK | [`apk/이기협_내운전약속_release.apk`](apk/) (release, 서명됨, 약 41MB) |
+| 개발·테스트 에뮬레이터 | Pleos Connect Emulator **v2.1.0** (`release_connect_v2.1.0`, Android 14 / API 34, x86_64) |
+| 화면 규격 | **2560 × 1440 px, 160 dpi** (가로형, AVD 기기 `Pleos_Connect_v2_0`), 기본 전체 창. 2분할 창(폭 1100dp 미만)에도 대응 |
+| 바로 실행 | [7. 빌드·실행 → APK로 바로 실행](#apk로-바로-실행) |
+
 - 기획서: [docs/proposal.md](docs/proposal.md)
 - 플랫폼: Pleos Connect (Android Automotive OS), Kotlin, Jetpack Compose
 - 사용 SDK: Pleos Vehicle · NaviHelper · TextToSpeech · SpeechToText · FusedLocation (5종 모두)
@@ -238,6 +250,17 @@ app/src/main/java/com/yikihyub/drivingpromise/
 └── ui/                        Compose 화면 (오늘 · 내 약속 · 이달의 약속 · 설정·시연), Pleos 기본 앱 톤
 ```
 
+저장소 루트:
+
+```
+apk/                 제출용 release APK (이기협_내운전약속_release.apk)
+docs/proposal.md     기획서
+scripts/run.sh       디버그 빌드 → 설치 → 실행
+scripts/release.sh   서명된 release APK 빌드 → apk/ 에 복사
+scripts/vc.sh        Virtual Console 로 페달 시나리오 재현
+.env.example         Pleos Playground 키 형식 (.env 는 커밋 안 함)
+```
+
 동작 흐름:
 
 ```
@@ -251,6 +274,37 @@ Vehicle / 차속 / 위치 / 내비 ──▶ Gateway (StateFlow) ──▶ Drivi
 지원하지 않는 차량 신호는 null로 남고, 그 신호를 쓰는 안내만 꺼집니다. 내비가 연결되지 않아도 페달 확인 안내는 그대로 동작합니다.
 
 ## 7. 빌드·실행
+
+### APK로 바로 실행
+
+빌드 없이 제출된 release APK로 실행하는 방법입니다.
+
+1. Pleos Connect Emulator v2.1.0을 켭니다 (화면 2560×1440, 160dpi).
+2. APK를 설치합니다. `-g`는 위치·차속·마이크 런타임 권한을 미리 허용합니다.
+   ```bash
+   adb install -r -g "apk/이기협_내운전약속_release.apk"
+   ```
+   `-g` 없이 설치하면 앱을 처음 열 때 권한 창이 뜹니다. 모두 허용해 주세요.
+3. 앱 목록에서 **내 운전 약속**을 열거나 아래 명령으로 실행합니다.
+   ```bash
+   adb shell am start --user current -n com.yikihyub.drivingpromise/.ui.MainActivity
+   ```
+4. 처음 실행하면 "내 운전 약속을 정해요" 화면이 나옵니다. 약속을 고르고 **시작하기**를 누르세요.
+5. **설정·시연** 탭의 시연 버튼 4개로 페달 확인 안내와 길 안내를 바로 볼 수 있습니다 ([8. 시연 방법](#8-시연-방법)). 음성 안내가 나오므로 PC 소리를 켜 두세요.
+
+같은 패키지의 디버그 빌드가 깔려 있으면 서명이 달라 설치가 거부됩니다. 이때는 `adb uninstall com.yikihyub.drivingpromise` 후 다시 설치하세요.
+
+### 테스트 환경과 필요한 설정
+
+| 항목 | 내용 |
+| --- | --- |
+| 에뮬레이터 | Pleos Connect Emulator v2.1.0 (Android Automotive 14, API 34, x86_64), 메모리 8GB, AAOS 사용자 10에서 실행 |
+| 화면 | 2560 × 1440 px, 160 dpi, 가로형. 낮/밤 모드 둘 다 확인 |
+| 차량 신호 | Pleos Virtual Console(선택). 없으면 앱 안 시연 버튼으로 같은 장면을 재현 |
+| 권한 | 위치(`FUSED_LOCATION`), 차속(`CAR_SPEED`), 마이크(`RECORD_AUDIO`) 허용 필요. 나머지는 설치 시 자동 |
+| 네트워크 | 없어도 됨. 음성 안내(TTS)와 음성 인식은 차 안(ON_DEVICE)에서 동작. 네트워크가 있으면 음성 인식은 서버(HYBRID)도 사용 |
+| 시간대·위치 | 해 지는 시각을 현재 위치로 계산합니다. 확인할 때는 에뮬레이터를 서울(Asia/Seoul, 37.5665, 126.9780)로 두었습니다. "해 지기 전 도착" 그림은 해가 지기 전에만 보입니다 |
+| 빌드 도구 | JDK 17, Android SDK 35 (build-tools 35.0.0), Gradle Wrapper 포함 |
 
 ### 준비
 - JDK 17, Android SDK (compileSdk 35, minSdk 28)
@@ -269,6 +323,25 @@ Vehicle / 차속 / 위치 / 내비 ──▶ Gateway (StateFlow) ──▶ Drivi
 빌드할 때 `app/build.gradle.kts`가 `.env`를 읽어 `BuildConfig`에 넣습니다. 같은 이름의 환경 변수가 있으면 그 값이 먼저입니다.
 
 ### 빌드와 설치
+
+릴리스 APK 만들기 (`apk/`에 제출 파일명으로 복사):
+
+```bash
+./scripts/release.sh
+```
+
+서명 정보는 루트 `keystore.properties`(커밋 안 함)에서 읽습니다. 형식:
+
+```properties
+storeFile=/절대/경로/release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+release 빌드는 쓰지 않는 Material 아이콘만 덜어 냅니다(65MB → 41MB). Pleos SDK와 그 의존성은 리플렉션·IPC를 쓰므로 그대로 둡니다 (`app/proguard-rules.pro`).
+
+디버그 빌드:
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug   # 테스트 + APK
@@ -298,7 +371,7 @@ adb logcat -s Companion VehicleGateway SpeedGateway NaviGateway SpeechGateway
 - Virtual Console의 `/vehicle/controls`는 차속을 **정수 km/h**로만 받습니다(소수면 400 `invalid_speed`).
 - R 기어에서는 Pleos가 후방 카메라를 전체 화면으로 띄워 앱 화면을 가립니다. 실제 차도 같으므로 후진 중에는 음성 안내가 주 수단입니다.
 
-### 에뮬레이터 확인 결과 (Pleos Connect Emulator 2.x, 2026-11-13)
+### 에뮬레이터 확인 결과 (Pleos Connect Emulator v2.1.0, 2026-11-13 · release APK 2026-11-15)
 
 | 항목 | 결과 |
 | --- | --- |
@@ -306,14 +379,16 @@ adb logcat -s Companion VehicleGateway SpeedGateway NaviGateway SpeechGateway
 | 차속 (`PERF_VEHICLE_SPEED`) | 정상, 약 0.1초 간격으로 들어옴 |
 | 후진 중 엑셀 / 브레이크 덜 밟음 / 급출발 | 세 안내 모두 울림 |
 | 보통 출발·감속 | 안내 없음 |
-| 페달 경고 전체 화면, 시연 버튼 3개 | 정상 |
-| TTS (ON_DEVICE) | 음성 합성 확인 (에뮬레이터는 `-no-audio`로 실행해 소리는 미확인) |
+| 페달 경고 전체 화면, 시연 버튼 4개 | 정상 |
+| 길 안내 시연 (회전교차로·스쿨존·터널·사고다발·좌회전) | 음성 안내와 "곧 만나는 곳" 카드 정상 |
+| TTS (ON_DEVICE) | 음성 합성과 오디오 출력 완료 확인 |
+| release APK (서명·축소 빌드) | 설치, 첫 실행, SDK 5종 연결, 페달 시연 음성까지 디버그와 동일하게 동작 |
 | STT HYBRID `registerApp` | `.env` Client ID/Secret으로 서버 연결됨 |
-| NaviHelper | 연결됨 (경로 안내 시나리오는 아직 미확인) |
+| NaviHelper | 연결됨 (실제 경로 안내 이벤트는 앱 안 길 안내 시연으로 같은 처리 경로를 확인) |
 | 에뮬레이터에 없는 신호 | 연료(EV 차), 연속 주행시간 → 연속 주행시간은 운행 시작 시각으로 대신 계산 |
 
 ### Virtual Console 없이
-"설정·시연" 탭의 버튼 3개가 같은 신호를 앱 안에서 재현합니다. 실제 신호와 같은 판단 로직을 거칩니다. 시연 값은 운행 기록과 깜짝 지점에 남지 않습니다.
+"설정·시연" 탭의 버튼 4개가 같은 신호를 앱 안에서 재현합니다. 실제 신호와 같은 판단 로직을 거칩니다. 시연 값은 운행 기록과 깜짝 지점에 남지 않습니다.
 
 | 시연 | 흐름 |
 | --- | --- |
@@ -331,7 +406,7 @@ adb logcat -s Companion VehicleGateway SpeedGateway NaviGateway SpeechGateway
 ./gradlew testDebugUnitTest
 ```
 
-판단 로직 단위 테스트 30개 ([app/src/test](app/src/test/java/com/yikihyub/drivingpromise/domain)):
+판단 로직 단위 테스트 34개 ([app/src/test](app/src/test/java/com/yikihyub/drivingpromise/domain)):
 
 - `PedalGuardTest`: 후진 중 엑셀, 보통 출발은 조용, 급출발, 브레이크 덜 밟음, 정상 감속, 고속도로 합류는 조용, 일반 도로 극단 가속, 쿨다운, 민감도, P 기어
 - `PromisesTest`: 서울 동지·하지 일몰 시각, 시나리오 2 일몰 비교, 늦는 경우, 이미 해 진 경우, 말로 약속 정하기, 비 오는 날, 음성 명령, 시각 읽기

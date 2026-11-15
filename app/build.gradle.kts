@@ -14,6 +14,12 @@ val env = Properties().apply {
         .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
         .forEach { line -> setProperty(line.substringBefore("=").trim(), line.substringAfter("=").trim()) }
 }
+/** 릴리스 서명: 루트 keystore.properties (커밋 금지). 없으면 release 는 서명 없이 빌드된다. */
+val signing = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 fun envField(key: String) = "\"" + (System.getenv(key) ?: env.getProperty(key, "")) + "\""
 
 android {
@@ -34,9 +40,20 @@ android {
         buildConfigField("String", "PLEOS_CRN", envField("PLEOS_CRN"))
     }
 
+    signingConfigs {
+        if (signing.getProperty("storeFile") != null) create("release") {
+            storeFile = file(signing.getProperty("storeFile"))
+            storePassword = signing.getProperty("storePassword")
+            keyAlias = signing.getProperty("keyAlias")
+            keyPassword = signing.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+            // 쓰지 않는 아이콘만 덜어 낸다 (proguard-rules.pro). SDK 클래스는 모두 유지
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
